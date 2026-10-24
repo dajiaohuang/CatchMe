@@ -230,11 +230,19 @@ def _resolve_time_range(query: str, llm: LLM) -> dict | None:
 
     for key in ("start_hour", "end_hour"):
         val = result.get(key)
-        if val is not None:
-            try:
-                result[key] = int(val)
-            except (TypeError, ValueError):
-                result[key] = None
+        if val is None:
+            continue
+        if isinstance(val, bool):
+            result[key] = None
+            continue
+        try:
+            hour = int(val)
+        except (OverflowError, TypeError, ValueError):
+            result[key] = None
+            continue
+
+        max_hour = 23 if key == "start_hour" else 24
+        result[key] = hour if 0 <= hour <= max_hour else None
 
     return result
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from catchme.pipelines.retrieve import _sessions_in_range
+import pytest
+
+import catchme.pipelines.retrieve as retrieve_pipeline
+from catchme.pipelines.retrieve import _resolve_time_range, _sessions_in_range
 
 
 def _make_day(sessions: list[dict]) -> dict:
@@ -20,6 +23,62 @@ def _sess(start_str: str, end_str: str) -> dict:
         "start": datetime.strptime(start_str, fmt).timestamp(),
         "end": datetime.strptime(end_str, fmt).timestamp(),
     }
+
+
+class TestTimeRangeResolution:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("start_hour", -1),
+            ("start_hour", 24),
+            ("start_hour", 25),
+            ("end_hour", -1),
+            ("end_hour", 25),
+            ("start_hour", True),
+            ("end_hour", float("inf")),
+        ],
+    )
+    def test_invalid_llm_hours_are_ignored(self, monkeypatch, field, value):
+        response = {
+            "has_time": True,
+            "dates": None,
+            "reasoning": "synthetic invalid hour",
+            "start_hour": 6,
+            "end_hour": 18,
+        }
+        response[field] = value
+        monkeypatch.setattr(retrieve_pipeline, "_load_retrieve_config", lambda: {})
+        monkeypatch.setattr(retrieve_pipeline, "_get_prompt", lambda _key: "{query}")
+        monkeypatch.setattr(
+            retrieve_pipeline,
+            "_llm_json",
+            lambda *_args, **_kwargs: response.copy(),
+        )
+
+        resolved = _resolve_time_range("synthetic query", object())
+        day = _make_day([_sess("2026-03-23 08:00", "2026-03-23 09:00")])
+        _sessions_in_range(day, resolved["start_hour"], resolved["end_hour"])
+
+        assert resolved[field] is None
+
+    def test_end_hour_24_is_preserved(self, monkeypatch):
+        response = {
+            "has_time": True,
+            "dates": None,
+            "start_hour": 18,
+            "end_hour": 24,
+        }
+        monkeypatch.setattr(retrieve_pipeline, "_load_retrieve_config", lambda: {})
+        monkeypatch.setattr(retrieve_pipeline, "_get_prompt", lambda _key: "{query}")
+        monkeypatch.setattr(
+            retrieve_pipeline,
+            "_llm_json",
+            lambda *_args, **_kwargs: response.copy(),
+        )
+
+        resolved = _resolve_time_range("synthetic query", object())
+
+        assert resolved["end_hour"] == 24
 
 
 class TestSessionsInRange:
