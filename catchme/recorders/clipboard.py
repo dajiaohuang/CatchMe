@@ -48,7 +48,7 @@ class ClipboardRecorder(PollingRecorder):
         text = _read_clipboard_text()
         if not text:
             return
-        h = hashlib.md5(text.encode()).hexdigest()
+        h = hashlib.md5(text.encode(errors="surrogatepass")).hexdigest()
         if h == self._prev_hash:
             return
         self._prev_hash = h
