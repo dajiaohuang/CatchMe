@@ -38,6 +38,13 @@ class PollingRecorder:
 
     def stop(self) -> None:
         self._stop.set()
+        thread = getattr(self, "_thread", None)
+        if (
+            thread is not None
+            and thread is not threading.current_thread()
+            and thread.ident is not None
+        ):
+            thread.join()
 
     def _loop(self, emit: Emit) -> None:
         while not self._stop.wait(self.interval):
