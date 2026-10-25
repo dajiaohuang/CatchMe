@@ -14,10 +14,9 @@ def _is_junction(path: str) -> bool:
         return False
     try:
         attributes = os.lstat(path).st_file_attributes
-    except (AttributeError, OSError):
+    except OSError:
         return False
-    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    return bool(attributes & reparse_point)
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def dir_size_mb(path: str) -> float:
