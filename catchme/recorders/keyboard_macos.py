@@ -139,7 +139,10 @@ class KeyboardRecorder:
             self._loop = Quartz.CFRunLoopGetCurrent()
             Quartz.CFRunLoopAddSource(self._loop, src, Quartz.kCFRunLoopDefaultMode)
             Quartz.CGEventTapEnable(tap, True)
-            Quartz.CFRunLoopRun()
+            while self._running:
+                result = Quartz.CFRunLoopRunInMode(Quartz.kCFRunLoopDefaultMode, 0.1, False)
+                if result == Quartz.kCFRunLoopRunFinished:
+                    break
 
         def _run_ax():
             system = AXUIElementCreateSystemWide()

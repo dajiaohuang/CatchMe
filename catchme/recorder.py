@@ -30,6 +30,7 @@ class PollingRecorder:
     def __init__(self) -> None:
         self._stop = threading.Event()
         self._poll_error_logged = False
+        self._thread: threading.Thread | None = None
 
     def start(self, emit: Emit) -> None:
         self._stop.clear()
@@ -38,7 +39,7 @@ class PollingRecorder:
 
     def stop(self) -> None:
         self._stop.set()
-        thread = getattr(self, "_thread", None)
+        thread = self._thread
         if (
             thread is not None
             and thread is not threading.current_thread()

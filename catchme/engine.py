@@ -70,7 +70,7 @@ class Engine:
         self._organizer.stop()
         self._writer.join()
         if hasattr(self, "_organizer_thread"):
-            self._organizer_thread.join(timeout=5)
+            self._organizer_thread.join()
         self._flush()
 
     # ── Recorder → Working Memory ──

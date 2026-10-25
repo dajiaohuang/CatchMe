@@ -48,7 +48,12 @@ class NotificationRecorder:
             thread.join()
 
     def _run(self) -> None:
-        from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun, CFRunLoopStop
+        from CoreFoundation import (
+            CFRunLoopGetCurrent,
+            CFRunLoopRunInMode,
+            kCFRunLoopDefaultMode,
+            kCFRunLoopRunFinished,
+        )
         from Foundation import NSDistributedNotificationCenter, NSObject
 
         recorder = self
@@ -72,7 +77,10 @@ class NotificationRecorder:
         obs = Observer.alloc().init()
         center.addObserver_selector_name_object_(obs, "handle:", None, None)
         self._loop_ref = CFRunLoopGetCurrent()
-        if self._stop_requested.is_set():
-            CFRunLoopStop(self._loop_ref)
-            return
-        CFRunLoopRun()
+        try:
+            while not self._stop_requested.is_set():
+                result = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, False)
+                if result == kCFRunLoopRunFinished:
+                    break
+        finally:
+            center.removeObserver_(obs)

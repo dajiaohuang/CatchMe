@@ -36,7 +36,10 @@ def test_stop_waits_for_inflight_notification_callback():
 
     foundation = types.ModuleType("Foundation")
     foundation.NSDistributedNotificationCenter = types.SimpleNamespace(
-        defaultCenter=lambda: types.SimpleNamespace(addObserver_selector_name_object_=add_observer)
+        defaultCenter=lambda: types.SimpleNamespace(
+            addObserver_selector_name_object_=add_observer,
+            removeObserver_=lambda observer: None,
+        )
     )
     foundation.NSObject = _FakeNSObject
 
@@ -44,11 +47,13 @@ def test_stop_waits_for_inflight_notification_callback():
     core_foundation.CFRunLoopGetCurrent = lambda: object()
     core_foundation.CFRunLoopStop = lambda _loop: loop_stop_requested.set()
 
-    def run_loop():
+    def run_loop(_mode, _seconds, _return_after_source):
         center.observer.handle_(_FakeNotification())
         loop_stop_requested.wait(timeout=2)
 
-    core_foundation.CFRunLoopRun = run_loop
+    core_foundation.CFRunLoopRunInMode = run_loop
+    core_foundation.kCFRunLoopDefaultMode = "default"
+    core_foundation.kCFRunLoopRunFinished = 1
 
     recorder = NotificationRecorder()
 
@@ -84,3 +89,56 @@ def test_stop_waits_for_inflight_notification_callback():
 
     assert stopper_returned.is_set()
     assert worker is not None and not worker.is_alive()
+
+
+def test_stop_between_run_loop_check_and_entry_still_drains():
+    entered = threading.Event()
+    release_entry = threading.Event()
+    stop_requested = threading.Event()
+    release_legacy_loop = threading.Event()
+    observer_removed = threading.Event()
+    foundation = types.ModuleType("Foundation")
+    center = types.SimpleNamespace(
+        addObserver_selector_name_object_=lambda *args: None,
+        removeObserver_=lambda observer: observer_removed.set(),
+    )
+    foundation.NSDistributedNotificationCenter = types.SimpleNamespace(defaultCenter=lambda: center)
+    foundation.NSObject = _FakeNSObject
+    core_foundation = types.ModuleType("CoreFoundation")
+    core_foundation.CFRunLoopGetCurrent = lambda: object()
+    core_foundation.CFRunLoopStop = lambda loop: stop_requested.set()
+    core_foundation.kCFRunLoopDefaultMode = "default"
+    core_foundation.kCFRunLoopRunFinished = 1
+
+    def run_loop(*args):
+        entered.set()
+        release_entry.wait()
+        # A stop before native run-loop entry is not queued for a future run.
+        timeout = args[1] if args else 2
+        release_legacy_loop.wait(timeout=timeout)
+
+    core_foundation.CFRunLoopRun = run_loop
+    core_foundation.CFRunLoopRunInMode = run_loop
+    recorder = NotificationRecorder()
+    stopped = threading.Event()
+
+    def stop_recorder():
+        recorder.stop()
+        stopped.set()
+
+    with mock.patch.dict(
+        sys.modules, {"Foundation": foundation, "CoreFoundation": core_foundation}
+    ):
+        recorder.start(lambda event: None)
+        assert entered.wait(timeout=1)
+        stopper = threading.Thread(target=stop_recorder, daemon=True)
+        stopper.start()
+        try:
+            assert stop_requested.wait(timeout=1)
+            release_entry.set()
+            assert stopped.wait(timeout=0.5)
+        finally:
+            release_entry.set()
+            release_legacy_loop.set()
+            stopper.join(timeout=2)
+    assert observer_removed.is_set()

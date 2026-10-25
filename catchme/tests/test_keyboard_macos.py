@@ -85,3 +85,59 @@ def test_stop_waits_for_inflight_accessibility_poll(monkeypatch):
 
     assert stop_returned.is_set()
     assert not ax_worker.is_alive()
+
+
+def test_stop_during_event_tap_startup_does_not_enter_an_unstoppable_loop(monkeypatch):
+    keyboard_macos = _keyboard_macos_module()
+    enabled = threading.Event()
+    release_enable = threading.Event()
+    stop_signal = threading.Event()
+    release_legacy_loop = threading.Event()
+    quartz = keyboard_macos.Quartz
+    monkeypatch.setattr(quartz, "CGEventTapCreate", lambda *args: object(), raising=False)
+    monkeypatch.setattr(
+        quartz, "CFMachPortCreateRunLoopSource", lambda *args: object(), raising=False
+    )
+    monkeypatch.setattr(quartz, "CFRunLoopGetCurrent", lambda: object(), raising=False)
+    monkeypatch.setattr(quartz, "CFRunLoopAddSource", lambda *args: None, raising=False)
+    monkeypatch.setattr(quartz, "kCFRunLoopDefaultMode", "default", raising=False)
+    monkeypatch.setattr(quartz, "kCFRunLoopRunFinished", 1, raising=False)
+    monkeypatch.setattr(quartz, "CFRunLoopStop", lambda loop: stop_signal.set(), raising=False)
+    monkeypatch.setattr(
+        quartz, "CFRunLoopRun", lambda: release_legacy_loop.wait(timeout=2), raising=False
+    )
+    monkeypatch.setattr(
+        quartz,
+        "CFRunLoopRunInMode",
+        lambda mode, seconds, once: release_legacy_loop.wait(timeout=seconds),
+        raising=False,
+    )
+
+    def enable_tap(*args):
+        enabled.set()
+        release_enable.wait()
+
+    monkeypatch.setattr(quartz, "CGEventTapEnable", enable_tap, raising=False)
+    monkeypatch.setattr(keyboard_macos, "AXUIElementCreateSystemWide", lambda: object())
+    monkeypatch.setattr(keyboard_macos, "_AX_POLL_IDLE", 0.01)
+    recorder = keyboard_macos.KeyboardRecorder()
+    monkeypatch.setattr(recorder, "_poll_ax", lambda *args: None)
+    recorder.start(lambda event: None)
+    assert enabled.wait(timeout=1)
+    stopped = threading.Event()
+
+    def stop_recorder():
+        recorder.stop()
+        stopped.set()
+
+    stopper = threading.Thread(target=stop_recorder, daemon=True)
+    stopper.start()
+    try:
+        assert stop_signal.wait(timeout=1)
+        release_enable.set()
+        assert stopped.wait(timeout=0.5)
+    finally:
+        release_enable.set()
+        release_legacy_loop.set()
+        stopper.join(timeout=2)
+    assert all(not worker.is_alive() for worker in recorder._threads)
